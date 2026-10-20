@@ -540,6 +540,10 @@ class Handler(BaseHTTPRequestHandler):
             user = who.get('UserProfile') or {}
             login = user.get('LoginName', '')
             allowed = [x.strip().casefold() for x in os.environ.get('CONTROLLER_ALLOWED_LOGINS', '').split(',') if x.strip()]
+            # Explicitly delegate authorization to tailnet ACLs/grants, while
+            # still requiring a node verified by the local Tailscale daemon.
+            if '*' in allowed and who.get('Node', {}).get('ID'):
+                return user.get('DisplayName') or login or 'Tailnet device'
             own = self.server.ts_self
             owner = own.get('Self', {}).get('UserID')
             tagged = bool(own.get('Self', {}).get('Tags'))
@@ -549,7 +553,7 @@ class Handler(BaseHTTPRequestHandler):
                 return user.get('DisplayName') or login or 'Tailnet owner'
         except (OSError, ValueError, KeyError, http.client.HTTPException):
             pass
-        raise Problem('Use the owner’s Tailscale device or enter an API key. Tagged nodes require an allowed login.', 401)
+        raise Problem('This Tailscale device is not authorized. Ask the administrator for access or enter an API key.', 401)
 
     def dispatch(self, method):
         try:

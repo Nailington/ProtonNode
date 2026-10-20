@@ -21,6 +21,11 @@ Tagged calling devices use the API key. Existing Tailscale policy must allow
 administrators TCP 8000 on the management identity. Use a dedicated tag/grant for
 that identity if desired. The application does not change your tailnet policy.
 
+Set `CONTROLLER_ALLOWED_LOGINS=*` to allow all Tailscale-verified devices,
+including tagged devices, to read and control the panel. In this mode, manage
+access with Tailscale ACLs/grants for TCP port 8000 on `proton-control`.
+Explicit invalid API keys are still rejected. Recreate `control-proxy` after changing this setting.
+
 A holder of the control key can manage the VPN regardless of account-owner rules,
 but must still be able to reach the management node through Tailscale policy.
 The same key authenticates the internal Gluetun/probe APIs; keep it private.

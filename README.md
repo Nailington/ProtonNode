@@ -144,6 +144,11 @@ exposure. HTTP travels inside Tailscale’s encrypted connection. The native Glu
 API and probe remain on the private Docker bridge. Do not publish them through a
 reverse proxy. The dashboard rejects cross-origin writes and unexpected Host names.
 
+Set `CONTROLLER_ALLOWED_LOGINS=*` to allow all Tailscale-verified devices,
+including tagged devices, to read and control the panel. In this mode, manage
+access with Tailscale ACLs/grants for TCP port 8000 on `proton-control`.
+Explicit invalid API keys are still rejected. Recreate `control-proxy` after changing this setting.
+
 The control key in `secrets/control.key` also works in the dashboard or scripts.
 The browser keeps an entered key only in memory for that tab. Favorites contain
 only public hostnames and stay in that browser. Never put a key in a URL.
