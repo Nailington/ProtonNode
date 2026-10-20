@@ -1,22 +1,465 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>ProtonNode · Private gateway</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
-<body><div class="shell">
-<header><a class="brand" href="/" aria-label="ProtonNode home"><span class="brand-icon">P<span>↗</span></span><span>proton<span class="muted">node</span></span></a><span class="tailnet"><i></i> Private tailnet</span></header>
-<div id="demo" class="banner" hidden>PREVIEW · Synthetic servers and addresses. This preview does not control a VPN.</div>
-<main><div class="intro"><div><p class="eyebrow">YOUR PRIVATE GATEWAY</p><h1>A different route.<br>The same tailnet.</h1><p class="subtext">Choose where your exit node meets the internet.</p></div><span id="identity" class="identity">Connecting to controller…</span></div>
-<div id="notice" role="status" class="notice" hidden></div>
-<section id="auth" class="panel auth" hidden><h2>Unlock your gateway</h2><p>Your Tailscale device needs permission to access this panel. You can also use the control API key.</p><form id="auth-form"><label for="api-key">API key</label><div class="inline"><input id="api-key" type="password" autocomplete="off" required placeholder="Kept in memory for this tab only"><button>Unlock</button></div></form></section>
-<section class="connection panel" aria-labelledby="connection-title"><div class="connection-top"><span class="eyebrow">EXIT CONNECTION</span><span id="state" class="badge">Checking</span></div><div class="connection-body"><div class="route-icon" aria-hidden="true">↗</div><div><h2 id="connection-title">Checking your route</h2><p id="current-server" class="muted">Waiting for a verified connection</p></div><div class="egress"><span class="eyebrow">PUBLIC IP</span><strong id="public-ip">—</strong><small id="checked" class="muted">Fresh egress check pending</small></div></div><div class="connection-bottom"><span id="saved-summary" class="muted">Selections persist across restarts.</span><div class="inline"><button id="reconnect" class="secondary" data-action="reconnect">Reconnect</button><button id="disconnect" class="quiet" data-action="disconnect">Disconnect</button></div></div></section>
-<section id="progress" class="progress panel" aria-live="polite" hidden><span class="spinner" aria-hidden="true"></span><div><strong id="progress-title">Changing connection</strong><p id="progress-detail" class="muted">Your tailnet remains available.</p></div></section>
-<section class="speed-panel panel" aria-labelledby="speed-title">
-<div class="speed-heading"><div><p class="eyebrow">MEASURE YOUR ROUTE</p><h2 id="speed-title">Speed test</h2></div><button id="run-speed" type="button" disabled>Run speed test <span aria-hidden="true">↗</span></button></div>
-<p class="speed-intro">Measure the gateway’s raw Proton connection. Speeds may vary when connected through Tailscale.</p>
-<div class="speed-options"><span id="speed-data-cost">Click to run · About 210 MB on the server</span></div>
-<div id="speed-progress" class="speed-progress" role="status" aria-live="polite" hidden><span class="spinner" aria-hidden="true"></span><span id="speed-stage">Ready</span></div>
-<div class="speed-results"><article class="speed-card"><div class="speed-card-top"><h3>Raw Proton</h3><span class="speed-path">Gateway → Proton → Internet</span></div><div class="speed-metrics"><div><span>Download</span><strong id="raw-down">—</strong><small>Mbps</small></div><div><span>Upload</span><strong id="raw-up">—</strong><small>Mbps</small></div></div><p id="raw-context" class="speed-context">Not tested yet. Runs on the gateway, without Tailscale.</p></article></div>
-<p id="speed-message" class="speed-message" role="status"></p><p class="speed-footnote">Three transfers each way; median speeds. Results are saved and shared across the tailnet. Nothing runs automatically.</p>
-</section>
-<div class="workspace"><section class="servers panel" aria-labelledby="servers-title"><div class="section-heading"><div><p class="eyebrow">NEXT DESTINATION</p><h2 id="servers-title">Find your server</h2></div><button id="refresh" class="quiet">Refresh list ↻</button></div><div class="filters"><label class="search-label">Search<input id="search" type="search" placeholder="City, country, or server…" autocomplete="off"></label><label>Country<select id="country"><option value="">All countries</option></select></label><label>Route type<select id="mode"><option value="p2p">P2P capable</option><option value="tor">Tor over VPN</option><option value="any">Any server</option></select></label></div><div class="list-heading"><span id="count">Loading servers…</span><label class="favorite-filter"><input id="favorites-only" type="checkbox"> Favorites</label></div><div id="server-list" class="server-list" role="radiogroup" aria-label="Choose a server"></div><div class="pagination"><button id="previous" class="quiet">← Previous</button><span id="page"></span><button id="next" class="quiet">Next →</button></div><div class="selection-footer"><div><span class="eyebrow">SELECTED SERVER</span><strong id="selected-name">Choose a destination</strong><small id="selected-detail" class="muted">An exact server is saved after verification.</small></div><button id="connect" disabled>Connect <span aria-hidden="true">↗</span></button></div></section>
-<aside><section class="panel history"><p class="eyebrow">RECENT ACTIVITY</p><h2>Connection history</h2><div id="history"><p class="muted">No changes yet.</p></div></section><section class="note"><span class="note-icon">⌘</span><h3>Your devices stay connected</h3><p>Select <strong>protonnode</strong> in Tailscale’s exit-node list. This dashboard changes the Proton route for every device using that exit node.</p><p>A server change briefly interrupts internet traffic. Tailnet access and this dashboard stay available.</p></section></aside></div>
-<details class="panel api"><summary><span>Build it into your workflow</span><span class="muted">Private HTTP API <span aria-hidden="true">↗</span></span></summary><p>Use the same control key from <code>secrets/control.key</code>. Keep it private. All requests stay inside your tailnet.</p><div class="api-actions"><button id="copy-api" class="secondary">Copy switch example</button><span id="copy-result" role="status"></span></div><pre id="api-example"></pre><p>Reads: <code>GET /api/v1/status</code>, <code>/api/v1/servers</code>, <code>/api/v1/operations</code>, <code>/api/v1/operations/{id}</code>.</p><p>Writes return <code>202</code> with an operation ID. Poll until <code>succeeded</code> or <code>failed</code>. Actions: <code>switch</code>, <code>connect</code>, <code>disconnect</code>, <code>reconnect</code>, <code>speedtest</code> (raw Proton only). Reuse an <code>Idempotency-Key</code> to safely retry the same request.</p></details>
-</main><footer><span>PROTONNODE</span><span>Tailnet access · Verified routes · Saved selections</span></footer></div></body></html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>ProtonNode · Gateway overview</title>
+    <script src="/app.js"></script>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <svg
+      class="icon-definitions"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <defs>
+        <symbol id="i-grid" viewBox="0 0 24 24">
+          <rect x="3" y="3" width="7" height="7" rx="1.5" />
+          <rect x="14" y="3" width="7" height="7" rx="1.5" />
+          <rect x="3" y="14" width="7" height="7" rx="1.5" />
+          <rect x="14" y="14" width="7" height="7" rx="1.5" />
+        </symbol>
+        <symbol id="i-globe" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="9" />
+          <ellipse cx="12" cy="12" rx="4" ry="9" />
+          <path d="M3 12h18M5 6.5h14M5 17.5h14" />
+        </symbol>
+        <symbol id="i-server" viewBox="0 0 24 24">
+          <rect x="3" y="3" width="18" height="7" rx="2" />
+          <rect x="3" y="14" width="18" height="7" rx="2" />
+          <path d="M7 6.5h.01M7 17.5h.01M12 6.5h5M12 17.5h5" />
+        </symbol>
+        <symbol id="i-clock" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7v5l3 2" />
+        </symbol>
+        <symbol id="i-code" viewBox="0 0 24 24">
+          <path d="m8 7-5 5 5 5m8-10 5 5-5 5M14 4l-4 16" />
+        </symbol>
+        <symbol id="i-shield" viewBox="0 0 24 24">
+          <path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6l-8-3Z" />
+          <path d="m8 12 3 3 5-6" />
+        </symbol>
+        <symbol id="i-network" viewBox="0 0 24 24">
+          <rect x="8" y="2" width="8" height="6" rx="1.5" />
+          <rect x="2" y="16" width="8" height="6" rx="1.5" />
+          <rect x="14" y="16" width="8" height="6" rx="1.5" />
+          <path d="M12 8v4M6 16v-4h12v4" />
+        </symbol>
+        <symbol id="i-refresh" viewBox="0 0 24 24">
+          <path d="M20 7v5h-5M4 17v-5h5" />
+          <path d="M6 7a7 7 0 0 1 12-1l2 3M4 15l2 3a7 7 0 0 0 12-1" />
+        </symbol>
+        <symbol id="i-search" viewBox="0 0 24 24">
+          <circle cx="10.5" cy="10.5" r="6.5" />
+          <path d="m16 16 5 5" />
+        </symbol>
+        <symbol id="i-arrow" viewBox="0 0 24 24">
+          <path d="M5 12h14m-5-5 5 5-5 5" />
+        </symbol>
+        <symbol id="i-copy" viewBox="0 0 24 24">
+          <rect x="8" y="8" width="12" height="13" rx="2" />
+          <path d="M15 8V3H3v13h5" />
+        </symbol>
+        <symbol id="i-power" viewBox="0 0 24 24">
+          <path d="M12 2v10M6 5a9 9 0 1 0 12 0" />
+        </symbol>
+        <symbol id="i-down" viewBox="0 0 24 24">
+          <path d="M12 3v16m-6-6 6 6 6-6M4 21h16" />
+        </symbol>
+      </defs>
+    </svg>
+    <a class="skip-link" href="#overview">Skip to dashboard</a>
+    <div class="shell">
+      <div class="main-shell">
+        <header class="topbar">
+          <a class="brand" href="#overview" aria-label="ProtonNode home"
+            ><span class="brand-mark"
+              ><svg class="icon" aria-hidden="true">
+                <use href="#i-network" /></svg></span
+            ><span>proton<span class="brand-light">node</span></span></a
+          >
+          <div class="topbar-right">
+            <button
+              id="theme-toggle"
+              class="secondary theme-toggle"
+              type="button"
+              aria-label="Switch to dark mode"
+              title="Switch to dark mode"
+              aria-pressed="false"
+            >
+              <svg
+                class="icon theme-moon"
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+              >
+                <path d="M20.8 13A9 9 0 0 1 11 3.2 9 9 0 1 0 20.8 13Z" />
+              </svg>
+              <svg
+                class="icon theme-sun"
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+              >
+                <circle cx="12" cy="12" r="4" />
+                <path
+                  d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"
+                />
+              </svg>
+              <span class="theme-label">Dark mode</span>
+            </button>
+            <span class="tailnet"
+              ><span class="status-dot"></span>Private tailnet</span
+            ><span class="identity-wrap"
+              ><span class="avatar" aria-hidden="true">P</span
+              ><span id="identity">Connecting…</span></span
+            >
+          </div>
+        </header>
+        <main id="overview">
+          <div id="demo" class="banner" hidden>
+            <strong>Preview mode</strong> Synthetic servers and measurements.
+            This preview does not control a VPN.
+          </div>
+          <div class="intro">
+            <div>
+              <h1>Gateway overview</h1>
+              <p>Your connection, your route. All in one place.</p>
+            </div>
+            <span class="live-label"
+              ><span id="live-dot" class="status-dot pending"></span
+              ><span id="live-label">Waiting for controller</span></span
+            >
+          </div>
+          <div id="notice" role="status" class="notice" hidden></div>
+          <section id="auth" class="panel auth" hidden>
+            <h2>Unlock your gateway</h2>
+            <p>
+              Your Tailscale device needs permission to access this panel. You
+              can also use the control API key.
+            </p>
+            <form id="auth-form">
+              <label for="api-key">API key</label>
+              <div class="inline">
+                <input
+                  id="api-key"
+                  type="password"
+                  autocomplete="off"
+                  required
+                  placeholder="Kept in memory for this tab only"
+                /><button>Unlock</button>
+              </div>
+            </form>
+          </section>
+          <section id="progress" class="progress" aria-live="polite" hidden>
+            <span class="spinner" aria-hidden="true"></span>
+            <div>
+              <strong id="progress-title">Changing connection</strong>
+              <p id="progress-detail">Your tailnet remains available.</p>
+            </div>
+          </section>
+          <div class="overview-grid">
+            <section
+              class="connection panel"
+              aria-labelledby="connection-heading"
+            >
+              <div class="section-heading">
+                <h2 id="connection-heading">
+                  <svg class="icon"><use href="#i-shield" /></svg>Exit
+                  connection
+                </h2>
+                <span id="state" class="badge">Checking</span>
+              </div>
+              <div class="connection-body">
+                <div>
+                  <p class="field-label">Current destination</p>
+                  <h3 id="connection-title">Checking your route</h3>
+                  <p id="current-server">Waiting for a verified connection</p>
+                </div>
+                <div class="connection-actions">
+                  <button id="reconnect" class="secondary" disabled>
+                    <svg class="icon"><use href="#i-refresh" /></svg
+                    >Reconnect</button
+                  ><button
+                    id="disconnect"
+                    class="icon-button danger"
+                    title="Disconnect VPN"
+                    aria-label="Disconnect VPN"
+                    disabled
+                  >
+                    <svg class="icon"><use href="#i-power" /></svg>
+                  </button>
+                </div>
+              </div>
+              <div
+                id="route-path"
+                class="route-path"
+                aria-label="Exit traffic route"
+              >
+                <div class="route-stop">
+                  <span class="route-node"
+                    ><svg class="icon"><use href="#i-network" /></svg></span
+                  ><strong>Your tailnet</strong><small>Device traffic</small>
+                </div>
+                <span class="route-line" aria-hidden="true"></span>
+                <div class="route-stop">
+                  <span class="route-node"
+                    ><svg class="icon"><use href="#i-server" /></svg></span
+                  ><strong>Exit node</strong><small>Tailscale</small>
+                </div>
+                <span class="route-line encrypted" aria-hidden="true"></span>
+                <div class="route-stop proton-stop">
+                  <span class="route-node"
+                    ><svg class="icon"><use href="#i-shield" /></svg></span
+                  ><strong>Proton VPN</strong
+                  ><small id="route-location">Verifying route</small>
+                </div>
+                <span class="route-line" aria-hidden="true"></span>
+                <div class="route-stop">
+                  <span class="route-node"
+                    ><svg class="icon"><use href="#i-globe" /></svg></span
+                  ><strong>Internet</strong><small>Public egress</small>
+                </div>
+              </div>
+              <div class="connection-facts">
+                <div>
+                  <span class="field-label">Public IP</span>
+                  <div class="ip-value">
+                    <strong id="public-ip">—</strong
+                    ><button
+                      id="copy-ip"
+                      class="icon-button"
+                      title="Copy public IP"
+                      aria-label="Copy public IP"
+                      disabled
+                    >
+                      <svg class="icon"><use href="#i-copy" /></svg>
+                    </button>
+                  </div>
+                  <small id="checked">Egress check pending</small>
+                </div>
+                <div>
+                  <span class="field-label">Tunnel health</span
+                  ><strong id="tunnel-health" class="health-value"
+                    >Checking…</strong
+                  ><small id="saved-summary">Waiting for controller</small>
+                </div>
+              </div>
+            </section>
+            <section class="speed-panel panel" aria-labelledby="speed-title">
+              <div class="section-heading">
+                <h2 id="speed-title">Connection speed</h2>
+                <span class="subtle-tag">On demand</span>
+              </div>
+              <p class="speed-intro">Raw Proton performance at your gateway.</p>
+              <div class="speed-metrics">
+                <div>
+                  <span
+                    ><svg class="icon"><use href="#i-down" /></svg
+                    >Download</span
+                  >
+                  <div><strong id="raw-down">—</strong><small>Mbps</small></div>
+                </div>
+                <div>
+                  <span
+                    ><svg class="icon upload-icon"><use href="#i-down" /></svg
+                    >Upload</span
+                  >
+                  <div><strong id="raw-up">—</strong><small>Mbps</small></div>
+                </div>
+              </div>
+              <p id="raw-context" class="speed-context">
+                No test yet. Run a test to measure this route.
+              </p>
+              <div
+                id="speed-progress"
+                class="speed-progress"
+                role="status"
+                aria-live="polite"
+                hidden
+              >
+                <span class="spinner" aria-hidden="true"></span
+                ><span id="speed-stage">Ready</span>
+              </div>
+              <button id="run-speed" class="secondary" type="button" disabled>
+                Run speed test
+              </button>
+              <p id="speed-data-cost" class="speed-cost">
+                About 210 MB on the server
+              </p>
+              <p id="speed-message" class="speed-message" role="status"></p>
+              <details class="speed-details">
+                <summary>How this is measured</summary>
+                <p>
+                  Median of three transfers each way, measured on the gateway.
+                  Tailscale client speeds may differ. Results are saved and
+                  shared. Tests run only when requested.
+                </p>
+              </details>
+            </section>
+          </div>
+          <div class="workspace">
+            <section
+              id="servers"
+              class="servers panel"
+              aria-labelledby="servers-title"
+            >
+              <div class="section-heading">
+                <div>
+                  <h2 id="servers-title">Find your next destination</h2>
+                  <p>Choose the server your exit node connects to.</p>
+                </div>
+                <button
+                  id="refresh"
+                  class="icon-button"
+                  title="Refresh server list"
+                  aria-label="Refresh server list"
+                >
+                  <svg class="icon"><use href="#i-refresh" /></svg>
+                </button>
+              </div>
+              <div class="filters">
+                <label class="search-label"
+                  ><span class="sr-only">Search servers</span
+                  ><svg class="icon"><use href="#i-search" /></svg
+                  ><input
+                    id="search"
+                    type="search"
+                    placeholder="Search city, country, or server"
+                    autocomplete="off" /></label
+                ><label
+                  ><span class="sr-only">Country</span
+                  ><select id="country">
+                    <option value="">All countries</option>
+                  </select></label
+                ><label
+                  ><span class="sr-only">Route type</span
+                  ><select id="mode">
+                    <option value="any">All route types</option>
+                    <option value="p2p">P2P capable</option>
+                    <option value="tor">Tor over VPN</option>
+                  </select></label
+                >
+              </div>
+              <div class="list-heading">
+                <span id="count" role="status">Loading servers…</span
+                ><label class="favorite-filter"
+                  ><input id="favorites-only" type="checkbox" /><span
+                    aria-hidden="true"
+                    >☆</span
+                  >
+                  Favorites only</label
+                >
+              </div>
+              <div class="table-heading" aria-hidden="true">
+                <span>Location / server</span><span>Route type</span
+                ><span>Save</span>
+              </div>
+              <div
+                id="server-list"
+                class="server-list"
+                role="radiogroup"
+                aria-label="Choose a server"
+              >
+                <p class="empty">Loading the server catalog…</p>
+              </div>
+              <div class="pagination">
+                <span id="page">—</span>
+                <div>
+                  <button id="previous" class="quiet" disabled>
+                    ← Previous</button
+                  ><button id="next" class="quiet" disabled>Next →</button>
+                </div>
+              </div>
+              <div class="selection-footer">
+                <div>
+                  <strong id="selected-name">Choose a destination</strong
+                  ><small id="selected-detail"
+                    >Select a server above to change your route.</small
+                  >
+                </div>
+                <button id="connect" disabled>
+                  Connect<svg class="icon"><use href="#i-arrow" /></svg>
+                </button>
+              </div>
+            </section>
+            <aside class="support-column">
+              <section
+                id="activity"
+                class="panel history"
+                aria-labelledby="activity-title"
+              >
+                <div class="section-heading">
+                  <h2 id="activity-title">Recent activity</h2>
+                  <svg class="icon muted"><use href="#i-clock" /></svg>
+                </div>
+                <div id="history">
+                  <p class="empty">Your connection changes will appear here.</p>
+                </div>
+              </section>
+              <section class="device-note">
+                <span class="note-icon"
+                  ><svg class="icon"><use href="#i-network" /></svg
+                ></span>
+                <h3>One route. All your devices.</h3>
+                <p>
+                  Select <strong>protonnode</strong> as your exit node in
+                  Tailscale. Every device using it shares the Proton destination
+                  you choose here.
+                </p>
+                <p class="note-footnote">
+                  Switching briefly interrupts internet traffic. Tailnet access
+                  stays available.
+                </p>
+              </section>
+            </aside>
+          </div>
+          <details id="api" class="panel api">
+            <summary>
+              <span
+                ><svg class="icon"><use href="#i-code" /></svg
+                ><strong>Your gateway, in your workflow</strong></span
+              ><span class="api-summary-detail"
+                >Private HTTP API <span aria-hidden="true">⌄</span></span
+              >
+            </summary>
+            <div class="api-content">
+              <p>
+                Automate connection changes with the same control key from
+                <code>secrets/control.key</code>. Requests stay inside your
+                tailnet.
+              </p>
+              <div class="api-actions">
+                <button id="copy-api" class="secondary">
+                  Copy switch example</button
+                ><span id="copy-result" role="status"></span>
+              </div>
+              <pre id="api-example"></pre>
+              <p>
+                Read <code>/api/v1/status</code>, <code>/api/v1/servers</code>,
+                or <code>/api/v1/operations</code>. Writes return
+                <code>202</code> with an operation ID. Poll
+                <code>/api/v1/operations/{id}</code> until
+                <code>succeeded</code>, <code>failed</code>, or
+                <code>interrupted</code>.
+              </p>
+              <p>
+                Actions: <code>switch</code>, <code>connect</code>,
+                <code>disconnect</code>, <code>reconnect</code>, and
+                <code>speedtest</code>. Reuse an <code>Idempotency-Key</code> to
+                safely retry the same request.
+              </p>
+            </div>
+          </details>
+          <footer>
+            <span
+              ><svg class="icon"><use href="#i-shield" /></svg>Private by
+              design. Accessible through your tailnet.</span
+            ><span>Proton VPN + Tailscale</span>
+          </footer>
+        </main>
+      </div>
+    </div>
+  </body>
+</html>
