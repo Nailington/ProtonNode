@@ -1,0 +1,25 @@
+.env
+.env.*
+!.env.example
+secrets/
+__pycache__/
+*.pyc
+/.local/
+
+# Local verification only; these are not part of the GitHub distribution.
+/tests/
+/scripts/test-vm.py
+/docs/test-vm.md
+/docs/vm-verification.md
+/docs/architecture.html
+/docs/*results.json
+# Unused legacy proxy implementation.
+/control-proxy/
+
+# Downloaded VPN profiles, private keys, and local databases.
+*.conf
+!config/exit-resolv.conf
+*.key
+*.pem
+*.sqlite
+*.sqlite-*

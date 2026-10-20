@@ -1,0 +1,179 @@
+services:
+  gluetun:
+    image: protonnode-gluetun:latest
+    build: ./vpn-gateway
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/usr/local/bin/protonnode-vpn-gateway.sh"]
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    # Initial deployment deliberately blocks public IPv6 instead of risking a bypass.
+    # The separate Tailscale namespace still handles tailnet IPv6 addresses.
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: "1"
+      net.ipv6.conf.default.disable_ipv6: "1"
+      net.ipv4.ip_forward: "1"
+    environment:
+      VPN_SERVICE_PROVIDER: protonvpn
+      VPN_TYPE: wireguard
+      WIREGUARD_PRIVATE_KEY: ${WIREGUARD_PRIVATE_KEY:?Set the Proton WireGuard private key in .env}
+      WIREGUARD_ADDRESSES: ${WIREGUARD_ADDRESSES:-10.2.0.2/32}
+      # Proton path MTU; Tailscale transport does not traverse this tunnel.
+      WIREGUARD_MTU: ${WIREGUARD_MTU:-1400}
+      SERVER_COUNTRIES: ${SERVER_COUNTRIES:-Netherlands}
+      SERVER_CITIES: ${SERVER_CITIES:-}
+      SERVER_HOSTNAMES: ${SERVER_HOSTNAMES:-}
+      PORT_FORWARD_ONLY: ${PORT_FORWARD_ONLY:-on}
+      TOR_ONLY: ${TOR_ONLY:-off}
+      VPN_PORT_FORWARDING: ${VPN_PORT_FORWARDING:-off}
+      FIREWALL: "on"
+      # Only the dedicated Docker bridge can reach this; no host port is published.
+      FIREWALL_INPUT_PORTS: "8000,8001"
+      HTTP_CONTROL_SERVER_ADDRESS: ":8000"
+      HTTP_CONTROL_SERVER_AUTH_CONFIG_FILEPATH: /run/secrets/control-auth.toml
+      # Proton's DNS is reached inside WireGuard and supports Tor server resolution.
+      DNS_SERVER: "off"
+      DNS_ADDRESS: ${PROTON_DNS_ADDRESS:-10.2.0.1}
+      EXIT_TRANSIT_IP: ${EXIT_TRANSIT_IP:-172.30.222.3}
+      VPN_GATEWAY_IP: ${VPN_GATEWAY_IP:-172.30.222.2}
+    volumes:
+      - gluetun-state:/gluetun
+      - controller-state:/run/protonnode-control:ro
+      - ./config/vpn-probe.py:/usr/local/bin/protonnode-vpn-probe.py:ro
+      - ./secrets/control.key:/run/secrets/control.key:ro
+      - type: bind
+        source: ./config/vpn-gateway.sh
+        target: /usr/local/bin/protonnode-vpn-gateway.sh
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./secrets/control-auth.toml
+        target: /run/secrets/control-auth.toml
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      control:
+        gw_priority: 1
+      vpn-transit:
+        ipv4_address: ${VPN_GATEWAY_IP:-172.30.222.2}
+
+  tailscale-exit:
+    image: tailscale/tailscale:v1.104.1
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/usr/local/bin/protonnode-exit-routing.sh"]
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      net.ipv4.ip_forward: "1"
+      net.ipv6.conf.all.forwarding: "1"
+      net.ipv4.conf.all.rp_filter: "0"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+        restart: true
+    environment:
+      TS_AUTHKEY: ${TS_EXIT_AUTHKEY:-}
+      TS_HOSTNAME: ${EXIT_HOSTNAME:-protonnode}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SOCKET: /var/run/tailscale/tailscaled.sock
+      TS_USERSPACE: "false"
+      TS_AUTH_ONCE: "true"
+      TS_BOOT_TIMEOUT: ${TS_BOOT_TIMEOUT:-30m}
+      TS_ACCEPT_DNS: "false"
+      # Our forwarding rules distinguish transport from Proton-bound exit data.
+      TS_EXTRA_ARGS: --advertise-exit-node --accept-routes=false --netfilter-mode=off
+      VPN_GATEWAY_IP: ${VPN_GATEWAY_IP:-172.30.222.2}
+      EXIT_TRANSIT_IP: ${EXIT_TRANSIT_IP:-172.30.222.3}
+      PROTON_DNS_ADDRESS: ${PROTON_DNS_ADDRESS:-10.2.0.1}
+    volumes:
+      - exit-state:/var/lib/tailscale
+      - type: bind
+        source: ./config/exit-routing.sh
+        target: /usr/local/bin/protonnode-exit-routing.sh
+        read_only: true
+        bind:
+          create_host_path: false
+      # Avoid Docker's embedded DNS forwarding public queries via the VPS resolver.
+      - type: bind
+        source: ./config/exit-resolv.conf
+        target: /etc/resolv.conf
+        read_only: true
+        bind:
+          create_host_path: false
+
+    networks:
+      transport:
+        gw_priority: 1
+      vpn-transit:
+        ipv4_address: ${EXIT_TRANSIT_IP:-172.30.222.3}
+
+  tailscale-control:
+    image: tailscale/tailscale:v1.104.1
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      TS_AUTHKEY: ${TS_CONTROL_AUTHKEY:-}
+      TS_HOSTNAME: ${CONTROL_HOSTNAME:-proton-control}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SOCKET: /var/run/tailscale/tailscaled.sock
+      TS_USERSPACE: "false"
+      TS_AUTH_ONCE: "true"
+      TS_BOOT_TIMEOUT: ${TS_BOOT_TIMEOUT:-30m}
+      TS_ACCEPT_DNS: "false"
+      TS_EXTRA_ARGS: --accept-routes=false
+    volumes:
+      - control-state:/var/lib/tailscale
+      - control-runtime:/var/run/tailscale
+    networks:
+      - control
+
+  control-proxy:
+    # Retain this service name for compatibility; it is now the web controller.
+    build: ./controller
+    restart: unless-stopped
+    network_mode: service:tailscale-control
+    depends_on:
+      tailscale-control:
+        condition: service_started
+        restart: true
+    environment:
+      CONTROL_HOSTNAME: ${CONTROL_HOSTNAME:-proton-control}
+      CONTROLLER_ALLOWED_LOGINS: ${CONTROLLER_ALLOWED_LOGINS:-}
+      TS_SOCKET: /var/run/tailscale/tailscaled.sock
+    volumes:
+      - control-runtime:/var/run/tailscale:ro
+      - controller-state:/var/lib/protonnode
+      - gluetun-state:/catalog:ro
+      - ./secrets/control.key:/run/secrets/control.key:ro
+    cap_drop:
+      - ALL
+    # Read the private 0600 bind-mounted key without widening its host permissions.
+    cap_add:
+      - DAC_OVERRIDE
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+
+networks:
+  control: {}
+  transport: {}
+  vpn-transit:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${VPN_TRANSIT_SUBNET:-172.30.222.0/29}
+
+volumes:
+  gluetun-state:
+  exit-state:
+  control-state:
+  control-runtime:
+  controller-state:
