@@ -127,6 +127,12 @@ After both nodes enroll successfully, you can clear `TS_EXIT_AUTHKEY` and
 their enrollment. Preserve the volumes; `docker compose down -v` deletes identity
 state. Manage node key expiry for an unattended gateway in Tailscale.
 
+Both Tailscale device names are configurable in `.env`: `EXIT_HOSTNAME=protonnode`
+names the exit node, and `CONTROL_HOSTNAME=proton-control` names the dashboard node.
+After changing either value, run `docker compose up -d` to recreate the affected
+containers. Use the new control hostname in the dashboard URL. Tailscale may add
+a suffix if another device already uses the requested name.
+
 ## Private dashboard and API
 
 Open **[http://proton-control:8000](http://proton-control:8000)** from a tailnet device.
@@ -225,33 +231,16 @@ for migration, state backups, and private API examples.
 
 ## On-demand speed tests
 
-Click **Run speed test** in the dashboard to compare:
+Click **Run speed test** to measure the gateway’s raw Proton connection. Speeds
+may vary when connected through Tailscale. The test runs on the gateway and
+uses three 50 MB downloads and three 20 MB uploads to Cloudflare, reporting median
+speeds. It transfers up to 210 MB on the server; the browser makes only same-origin
+API requests. Results persist in operation history and are shared across viewers.
 
-- **Raw Proton:** three 50 MB downloads and three 20 MB uploads from inside the
-  VPN gateway, without Tailscale in the data path.
-- **Proton through Tailscale:** the same transfers from the browser on your
-  device. Select `protonnode` as that device’s exit node first. The dashboard
-  verifies that its public IP matches the tested Proton IP before and after
-  recording a result.
-
-Both paths use Cloudflare and report medians. The tests run sequentially and
-use up to 420 MB total, including 210 MB on the browser device. Uncheck the device
-option to measure only raw Proton. The full-path test includes your device,
-Wi-Fi/mobile connection, Tailscale transport, gateway, and Proton; it is not a
-node-to-node benchmark. Browser and gateway clients can behave differently, so
-speed differences alone do not isolate Tailscale overhead.
-
-**Speed tests never start automatically** on page load, refresh, reconnect, or a
-server change. A gateway test starts only after an explicit button click or API
-operation. It can finish if you close the page; its result is saved with the
-server and check time. The device test must stay visible and stops if the page
-is hidden. Device results stay in the browser tab; no retries or resumptions
-start automatically.
-
-The gateway test has fixed destinations, data/time limits, one active operation,
-and a 30-second cooldown. A failure does not restart or reconfigure the VPN.
-An IP mismatch prevents recording a full-path result; it does not switch your
-device’s exit node for you.
+Tests require an explicit click/API operation and have a 30-second cooldown.
+Nothing runs on refresh. Closing the panel does not cancel a running test.
+The test verifies the Proton endpoint/IP before and after measurement and does
+not change Tailscale routing or VPN settings.
 
 ## Tor and P2P expectations
 

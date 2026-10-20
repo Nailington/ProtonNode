@@ -1,9 +1,8 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const state = {key:'', servers:[], status:null, selected:null, page:0, busy:false, favorites:new Set(), lastNotice:null};
-const speed = {running:false, phase:null, device:null, raw:null, abort:null, operation:null, stage:''};
+const speed = {running:false, raw:null, stage:''};
 try {state.favorites = new Set(JSON.parse(localStorage.getItem('protonnode-favorites') || '[]'));} catch (_) {}
-try {speed.device=JSON.parse(sessionStorage.getItem('protonnode-device-speed') || 'null');} catch (_) {}
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function notice(message, error=false) { $('notice').textContent=message; $('notice').classList.toggle('error',error); $('notice').hidden=!message; }
 async function api(path, options={}) {
@@ -46,7 +45,7 @@ function renderStatus(data) {
   $('saved-summary').textContent=data.saved ? 'Selection saved · Restored automatically after restart' : 'Selections persist after a successful connection.';
   $('progress').hidden=!active && data.ready;
   $('progress-title').textContent=active?.stage || 'Restoring saved connection';
-  $('progress-detail').textContent=active?.request.action==='speedtest' ? 'Measuring Proton only. No VPN settings are changed.' : active?.error ? `${active.error}. Attempting recovery…` : 'Tailnet access stays available. This page can be closed safely.';
+  $('progress-detail').textContent=active?.request.action==='speedtest' ? 'Measuring raw Proton on the gateway.' : active?.error ? `${active.error}. Attempting recovery…` : 'Tailnet access stays available. This page can be closed safely.';
   $('reconnect').disabled=state.busy || !data.ready || !data.saved;
   $('reconnect').textContent=data.connection==='disconnected'?'Connect saved':'Reconnect';
   $('disconnect').disabled=state.busy || !data.ready || data.connection==='disconnected' || !data.saved;
@@ -102,91 +101,28 @@ function speedMessage(text,error=false) {$('speed-message').textContent=text;$('
 function renderSpeed(data=state.status,active=data?.operations?.find(o=>['queued','running'].includes(o.state))) {
   const recent=data?.last_speedtest?.result;
   if(recent && (!speed.raw || recent.measured_at>=speed.raw.measured_at)) speed.raw=recent;
-  for(const [prefix,result] of [['raw',speed.raw],['device',speed.device]]) {
+  for(const [prefix,result] of [['raw',speed.raw]]) {
     $(prefix+'-down').textContent=formatSpeed(result?.download_median_mbps);
     $(prefix+'-up').textContent=formatSpeed(result?.upload_median_mbps);
   }
   $('raw-context').textContent=speed.raw ? `Last result · ${speed.raw.server.name} · ${speed.raw.server.city} · ${speedTime(speed.raw.measured_at)} · ${speed.raw.public_ip}` : 'Not tested yet. Runs on the gateway, without Tailscale.';
-  $('device-context').textContent=speed.device ? `Last result · ${speed.device.server.name} · ${speedTime(speed.device.measured_at)} · Proton IP verified: ${speed.device.public_ip}` : (speed.deviceMessage || 'Not tested yet. Select protonnode as this device’s exit node first.');
   const recentTest=data?.operations?.find(o=>o.request.action==='speedtest' && ['succeeded','failed','interrupted'].includes(o.state));
   const cooldown=recentTest ? Math.max(0,Math.ceil(30-(Date.now()/1000-recentTest.updated))) : 0;
   $('run-speed').disabled=speed.running || !!active || !!cooldown || !data?.ready || data?.connection!=='connected';
   $('run-speed').textContent=speed.running || active?.request.action==='speedtest' ? 'Testing…' : cooldown ? `Run again in ${cooldown}s` : 'Run speed test ↗';
-  $('include-device').disabled=speed.running || !!active;
-  $('speed-data-cost').textContent=$('include-device').checked ? 'Click to run · Up to 420 MB total · 210 MB on this device' : 'Click to run · About 210 MB on the gateway · Device test off';
+  $('speed-data-cost').textContent='Click to run · About 210 MB on the server';
   const running=speed.running || active?.request.action==='speedtest';
   $('speed-progress').hidden=!running;
-  $('speed-stage').textContent=speed.phase==='device' ? speed.stage : active?.request.action==='speedtest' ? active.stage : speed.stage || 'Preparing the speed test';
+  $('speed-stage').textContent=active?.request.action==='speedtest' ? active.stage : speed.stage || 'Preparing the speed test';
 }
 const pause = ms => new Promise(resolve=>setTimeout(resolve,ms));
-const median = values => [...values].sort((a,b)=>a-b)[Math.floor(values.length/2)];
-async function publicSpeedRequest(path,init,consume,timeout=30000) {
-  // This client deliberately never receives the dashboard's API-key headers.
-  const abort=new AbortController();
-  const cancelled=()=>abort.abort();
-  if(speed.abort?.signal.aborted) throw new Error('Device test stopped. Keep this page visible and click Run to try again.');
-  speed.abort?.signal.addEventListener('abort',cancelled,{once:true});
-  const timer=setTimeout(()=>abort.abort(),timeout);
-  try {
-    const response=await fetch('https://speed.cloudflare.com'+path,{...init,signal:abort.signal,mode:'cors',credentials:'omit',redirect:'error',cache:'no-store',referrerPolicy:'no-referrer'});
-    if(!response.ok) throw new Error(`Cloudflare returned ${response.status}. No device result was recorded.`);
-    return await consume(response);
-  } catch(error) {
-    if(abort.signal.aborted) throw new Error('Device test stopped or timed out. Keep this page visible and click Run to try again.');
-    throw error;
-  } finally {
-    clearTimeout(timer);speed.abort?.signal.removeEventListener('abort',cancelled);abort.abort();
-  }
-}
-async function devicePublicIP() {
-  return publicSpeedRequest('/cdn-cgi/trace',{method:'GET'},async response=>{
-    const match=(await response.text()).match(/^ip=(.+)$/m);
-    if(!match) throw new Error('Could not verify this device’s public IP. No full-path result was recorded.');
-    return match[1].trim();
-  },15000);
-}
-async function measureDevice(raw) {
-  speed.phase='device';speed.abort=new AbortController();speed.stage='Checking this device’s Proton IP';renderSpeed();
-  if(await devicePublicIP()!==raw.public_ip) throw new Error('This device is not exiting through the tested Proton IP. Select protonnode in Tailscale and click Run again.');
-  speed.deviceMessage='Proton IP verified. Measuring this device’s full exit path…';
-  const result={download_mbps:[],upload_mbps:[],server:raw.server,public_ip:raw.public_ip,
-    download_bytes:50000000,upload_bytes:20000000,samples:3,provider:'Cloudflare'};
-  const upload=new Uint8Array(20000000),deadline=performance.now()+150000;
-  for(const [direction,size] of [['download',50000000],['upload',20000000]]) {
-    for(let sample=0;sample<3;sample++) {
-      if(performance.now()>deadline) throw new Error('Device test exceeded its time limit. No device result was recorded.');
-      speed.stage=`Testing this device’s ${direction} ${sample+1}/3`;renderSpeed();
-      const started=performance.now();
-      if(direction==='download') {
-        await publicSpeedRequest(`/__down?bytes=${size}&nonce=${Date.now()}-${sample}`,{method:'GET'},async response=>{
-          const reader=response.body.getReader();let count=0;
-          try {while(true){const chunk=await reader.read();if(chunk.done) break;count+=chunk.value.byteLength;if(count>size) throw new Error('Unexpected download size');}}
-          finally {reader.releaseLock();}
-          if(count!==size) throw new Error('Incomplete device download. No device result was recorded.');
-        });
-      } else {
-        await publicSpeedRequest('/__up',{method:'POST',body:upload,headers:{'Content-Type':'text/plain'}},async response=>{await response.arrayBuffer();});
-      }
-      const elapsed=(performance.now()-started)/1000;
-      result[direction+'_mbps'].push(Math.round(size*8/elapsed/1000000*100)/100);
-    }
-  }
-  speed.stage='Verifying the exit path after the test';renderSpeed();
-  const latest=await api('/api/v1/status');
-  if(latest.connection!=='connected' || latest.server?.hostname!==raw.server.hostname || latest.probe.public_ip!==raw.public_ip || await devicePublicIP()!==raw.public_ip) throw new Error('The exit path changed during the test. Device results were discarded.');
-  result.download_median_mbps=median(result.download_mbps);result.upload_median_mbps=median(result.upload_mbps);result.measured_at=Date.now()/1000;
-  return result;
-}
 async function runSpeedTests() {
   if(speed.running || state.busy || !state.status?.ready) return;
-  const includeDevice=$('include-device').checked;
-  speed.running=true;speed.phase='proton';speed.stage='Starting the Proton test';speed.deviceMessage=null;
-  if(includeDevice){speed.device=null;try{sessionStorage.removeItem('protonnode-device-speed');}catch(_){}}
+  speed.running=true;speed.stage='Starting the Proton test';
   state.busy=true;renderSpeed();renderServers();speedMessage('Tests run only after this click. The gateway test can finish even if this page is closed.');
   try {
     const key=globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     let operation=await api('/api/v1/operations',{method:'POST',headers:{'Idempotency-Key':key},body:JSON.stringify({action:'speedtest'})});
-    speed.operation=operation.id;
     const deadline=performance.now()+240000;
     while(!['succeeded','failed','interrupted'].includes(operation.state)) {
       speed.stage=operation.stage;renderSpeed();
@@ -195,23 +131,15 @@ async function runSpeedTests() {
     }
     if(operation.state!=='succeeded') throw new Error(operation.error || operation.stage);
     speed.raw=operation.result;renderSpeed();
-    if(includeDevice && !state.status.demo) {
-      speed.device=await measureDevice(speed.raw);
-      try{sessionStorage.setItem('protonnode-device-speed',JSON.stringify(speed.device));}catch(_){}
-      speedMessage(`Both results used ${speed.raw.server.name} with verified Proton IP ${speed.raw.public_ip}.`);
-    } else speedMessage(state.status.demo ? 'Synthetic preview only. No external device test was started.' : 'Raw Proton test complete. The device test was not requested.');
+    speedMessage('Raw Proton measurement complete.');
   } catch(error) {
-    const message=error instanceof TypeError ? 'The browser could not reach Cloudflare. Check connectivity or browser blocking and click Run again.' : error.message;
-    if(speed.phase==='device') speed.deviceMessage=message;
-    speedMessage(message,true);
+    speedMessage(error.message,true);
   } finally {
-    speed.abort?.abort();speed.running=false;speed.phase=null;speed.stage='';
+    speed.running=false;speed.stage='';
     await poll();renderSpeed();
   }
 }
 $('run-speed').addEventListener('click',runSpeedTests);
-$('include-device').addEventListener('change',()=>renderSpeed());
-document.addEventListener('visibilitychange',()=>{if(document.hidden && speed.phase==='device') speed.abort?.abort();});
 
 async function initialize(){try{await loadCatalog();await poll();}catch(error){notice(error.message,true);}}
 initialize();

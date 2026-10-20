@@ -62,7 +62,7 @@ rejected; no cross-origin browser API is enabled.
 ```
 
 Use `connect` to resume the saved server, or `reconnect` to drain/restart it.
-Use `speedtest` to measure the raw Proton connection without changing settings.
+Use `speedtest` to measure raw Proton on the gateway.
 A switch is also allowed while disconnected. Modes are `p2p`, `tor`, and `any`.
 All filters must match; hostname can be combined with country/city.
 Hostname examples depend on the current catalog; obtain real entries from
@@ -92,7 +92,7 @@ not replace client-side DNS/IPv6 checks.
 
 ## On-demand throughput measurement
 
-`POST /api/v1/operations` with `{"action":"speedtest"}` starts only the raw
+`POST /api/v1/operations` with `{"action":"speedtest"}` starts the raw
 Proton measurement on the gateway. It uses the normal operation ID, polling,
 idempotency, authentication, and serialization rules. GET/status reads never
 start a measurement. Startup and reconnect recovery do not replay interrupted
@@ -108,25 +108,9 @@ failed operation without reconnecting, rolling back, or changing the selection.
 `GET /api/v1/status` includes the most recent successful result in
 `last_speedtest`, even after it leaves the 20-entry activity list.
 
-The dashboard's optional second phase runs directly in the current browser to
-measure **this device → Tailscale exit → Proton → Cloudflare**. It requires that
-the browser's public IP, obtained from Cloudflare's HTTPS trace endpoint,
-matches the tested Proton IP before and after measurement. A changed exit or
-IP mismatch discards the browser result. Select the exit node in your device's
-Tailscale app; the site cannot change client routing. The check verifies egress;
-it cannot inspect the device's OS VPN settings.
-
-This phase uses the same sizes and three samples in each direction, for 210 MB
-per path and up to 420 MB combined. Only clicking the button starts it. Keep the
-page visible; hiding it aborts the device test, with no automatic retry. Results
-stay in session storage for that browser tab and are never treated as another
-device's measurements. Raw results are stored in the controller's operation
-history. No node-to-node throughput estimate is substituted for the full path.
-
-The dashboard permits cross-origin connections only to `speed.cloudflare.com`
-in addition to its own origin. Public measurements use separate, credential-free
-requests: control API keys are never sent to Cloudflare. All scripts, styles,
-and fonts remain local. No speed-test library with automatic startup is loaded.
+Speeds may vary when connected through Tailscale. Only raw Proton is measured;
+the test never changes management routing. It transfers up to 210 MB on the server.
+The browser makes only same-origin API requests.
 
 ## Restart and migration
 
